@@ -14,7 +14,7 @@ StreamForge is a lightweight IPTV middleware that lets you:
 
 ## Quick Start
 
-### Docker (recommended)
+<!--### Docker (recommended)
 
 ```bash
 docker run -d --name streamforge \
@@ -52,6 +52,7 @@ services:
 ```bash
 docker compose up -d
 ```
+-->
 
 ### Node.js (dev)
 
@@ -99,7 +100,7 @@ FFmpeg (optional transcoding):
 
 ---
 
-## Build the Docker Image
+<!--## Build the Docker Image
 
 ```bash
 # build
@@ -119,7 +120,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   -t USER/streamforge:latest --push .
 ```
 
----
+--- -->
 
 ## Single Binary (optional)
 
