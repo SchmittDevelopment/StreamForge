@@ -1,0 +1,11 @@
+/**
+ * @file styles.css
+ * @description 
+ * @author 
+ * @copyright 
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* hier optional eigene Styles */

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StreamForge</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="/web/favicon.ico" sizes="any">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="flex">
+    <aside class="w-60 min-h-screen bg-slate-900 border-r border-slate-800 p-4 space-y-3">
+      <div class="text-2xl font-black text-teal-400">StreamForge</div>
+      <nav class="flex flex-col gap-2 text-sm">
+        <a href="#/playlist" class="navlink px-3 py-2 rounded hover:bg-slate-800">Playlist</a>
+        <a href="#/xmltv" class="navlink px-3 py-2 rounded hover:bg-slate-800">XMLTV</a>
+        <a href="#/mapping" class="navlink px-3 py-2 rounded hover:bg-slate-800">Mapping</a>
+        <a href="#/settings" class="navlink px-3 py-2 rounded hover:bg-slate-800">Settings</a>
+        <a href="#/log" class="navlink px-3 py-2 rounded hover:bg-slate-800">Log</a>
+      </nav>
+      <div class="mt-6 text-xs text-slate-400">StreamForge IPTV Middleware</div>
+    </aside>
+
+    <main class="flex-1 p-6 space-y-6">
+      <header class="flex items-center justify-between">
+        <h1 id="title" class="text-xl font-semibold">Playlist</h1>
+        <div class="flex items-center gap-2">
+          <a class="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-xs" href="/m3u" target="_blank">/m3u</a>
+          <a class="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-xs" href="/xmltv" target="_blank">/xmltv</a>
+          <a class="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-xs" href="/" target="_blank">HDHR</a>
+          <button id="refreshBtn" type="button" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Refresh</button>
+        </div>
+      </header>
+
+      <section id="page-playlist" class="page space-y-4">
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold">Local or remote playlists</h2>
+            <button id="newM3uBtn" type="button" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">New</button>
+          </div>
+          <form id="m3uForm" method="post" novalidate autocomplete="off" class="grid md:grid-cols-4 gap-2 hidden">
+            <input class="px-3 py-2 rounded bg-slate-800" name="name" placeholder="Name" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="url" placeholder="M3U URL" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="userAgent" placeholder="User-Agent (optional)" />
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Add</button>
+          </form>
+          <div id="m3uList" class="text-sm text-slate-300">No sources yet.</div>
+        </div>
+
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">Xtream Sources</h2>
+          <form id="xtreamForm" method="post" novalidate autocomplete="off" class="grid md:grid-cols-5 gap-2">
+            <input class="px-3 py-2 rounded bg-slate-800" name="name" placeholder="Name" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="baseUrl" placeholder="Base URL" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="username" placeholder="Username" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="password" placeholder="Password" required />
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Add</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="page-xmltv" class="page hidden space-y-4">
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">XMLTV Sources</h2>
+          <div id="epgList" class="space-y-2 mb-4 text-sm"></div>
+          <form id="epgForm" method="post" novalidate autocomplete="off" class="grid md:grid-cols-3 gap-2">
+            <input class="px-3 py-2 rounded bg-slate-800" name="name" placeholder="Name" required />
+            <input class="px-3 py-2 rounded bg-slate-800" name="url" placeholder="XMLTV URL" required />
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Add</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="page-mapping" class="page hidden space-y-4">
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <h2 class="font-semibold">Mapping</h2>
+            <div class="flex items-center gap-2">
+              <input id="searchBox" class="px-3 py-2 rounded bg-slate-800 text-sm" placeholder="Suche Kanäle…" />
+              <select id="groupFilter" class="px-3 py-2 rounded bg-slate-800 text-sm">
+                <option value="">Alle Gruppen</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 bg-slate-900/60 rounded-2xl p-3 border border-slate-800">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="selectAll"> Alle</label>
+          <button id="bulkEnable" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Aktivieren</button>
+          <button id="bulkDisable" class="px-3 py-2 rounded bg-red-600 hover:bg-red-500 text-sm">Deaktivieren</button>
+          <div class="flex items-center gap-2">
+            <input id="startNumber" class="px-2 py-1 rounded bg-slate-800 text-sm w-24" placeholder="Start=0">
+            <button id="bulkRenumber" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">Nummern setzen</button>
+          </div>
+        </div>
+        <div id="groupedChannels" class="space-y-3"></div>
+      </section>
+
+      <section id="page-settings" class="page hidden space-y-4">
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">HTTP / User-Agent</h2>
+          <form id="uaForm" class="grid md:grid-cols-3 gap-2">
+            <input class="px-3 py-2 rounded bg-slate-800" name="globalUserAgent" placeholder="Global User-Agent (optional)" />
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Save</button>
+          </form>
+        </div>
+
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">Transcoding</h2>
+          <form id="transForm" class="grid md:grid-cols-3 gap-2">
+            <label class="col-span-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" name="enabled" id="tcEnabled"> Enable Transcoding
+            </label>
+            <input class="px-3 py-2 rounded bg-slate-800" name="ffmpegPath" placeholder="ffmpeg path (auto default)" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="userAgent" placeholder="User-Agent override (optional)" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="videoCodec" placeholder="libx264" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="audioCodec" placeholder="aac" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="videoBitrate" placeholder="2500k" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="audioBitrate" placeholder="128k" />
+            <input class="px-3 py-2 rounded bg-slate-800" name="preset" placeholder="veryfast" />
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Save Transcoding</button>
+          </form>
+          <p class="text-xs text-slate-400 mt-2">Standard: Linux /usr/bin/ffmpeg, macOS /opt/homebrew/bin/ffmpeg, Windows im PATH.</p>
+        </div>
+
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">M3U Optionen</h2>
+          <form id="optsForm" class="space-y-2">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" id="includeChno" checked> Include channel number (tvg-chno)
+            </label>
+            <button class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Save</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="page-log" class="page hidden">
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800">
+          <h2 class="font-semibold mb-3">Log</h2>
+          <p class="text-sm text-slate-400">Nutze Terminal/Docker-Logs. (Optional erweiterbar)</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+    <div class="animate-spin rounded-full h-16 w-16 border-4 border-teal-400 border-t-transparent"></div>
+  </div>
+
+  <!-- Setup Wizard -->
+  <div id="setupWizard" class="fixed inset-0 bg-black/80 hidden z-40">
+    <div class="max-w-3xl mx-auto mt-20 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+      <h2 class="text-xl font-semibold mb-4">Setup Wizard</h2>
+      <ol class="list-decimal pl-6 space-y-2 text-sm text-slate-300">
+        <li>Füge eine Quelle hinzu: <span class="font-medium">M3U</span> (get.php) oder <span class="font-medium">Xtream</span>.</li>
+        <li>Füge eine <span class="font-medium">XMLTV (EPG)</span>-Quelle hinzu.</li>
+        <li>Setze optional <span class="font-medium">User-Agent</span> und <span class="font-medium">Transcoding</span> Einstellungen.</li>
+      </ol>
+      <div class="mt-4 text-xs text-slate-400">Der Wizard schließt sich automatisch, sobald mindestens eine Quelle vorhanden ist (EPG kann im Hintergrund laden).</div>
+      <div class="mt-6 text-right">
+        <button id="wizardClose" type="button" class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/web/app.js"></script>
+  <script>
+    const pages = ['playlist','xmltv','mapping','settings','log'];
+    function showPage(p){
+      pages.forEach(x => document.getElementById('page-'+x).classList.toggle('hidden', x!==p));
+      document.getElementById('title').textContent = p.charAt(0).toUpperCase()+p.slice(1);
+      document.querySelectorAll('.navlink').forEach(a=>a.classList.toggle('bg-slate-800', a.getAttribute('href')===('#/'+p)));
+    }
+    window.addEventListener('hashchange', ()=>showPage(location.hash.replace('#/','')||'playlist'));
+    document.addEventListener('DOMContentLoaded', ()=>showPage(location.hash.replace('#/','')||'playlist'));
+  </script>
+</body>
+</html>

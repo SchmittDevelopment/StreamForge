@@ -1,0 +1,45 @@
+{
+  "name": "streamforge",
+  "version": "0.6.0",
+  "author": "SchmittDEV",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+
+  "dependencies": {
+    "better-sqlite3": "^9.4.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "node-fetch": "^3.3.2",
+    "saxes": "^6.0.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "pkg": "^5.8.1"
+  },
+
+  "bin": "src/server.js",
+  "pkg": {
+    "scripts": [
+      "src/**/*.js",
+      "public/**/*"
+    ],
+    "assets": [
+      "public/**/*"
+    ],
+    "targets": [
+      "node20-linux-x64",
+      "node20-macos-arm64",
+      "node20-macos-x64",
+      "node20-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "scripts": {
+    "build:bin": "pkg ."
+  }
+}

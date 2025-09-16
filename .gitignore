@@ -1,0 +1,61 @@
+# Node modules & dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+data/
+!data/.keep        # falls du einen leeren Ordner behalten willst
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Tailwind CSS output
+public/app.css
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.iml
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# pkg binaries
+streamforge-linux-x64
+streamforge-macos-x64
+streamforge-macos-arm64
+streamforge-win-x64.exe
+
+# Archive & backups
+*.zip
+*.tar.gz
+*.tgz
+*.bak
+*.tmp
+
+# Git backups
+*.orig
