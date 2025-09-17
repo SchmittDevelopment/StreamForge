@@ -3,6 +3,7 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
 # Logs
 logs/
@@ -45,10 +46,14 @@ docker-compose.override.yml
 .dockerignore
 
 # pkg binaries
+build-warp/
+streamforge-linux-x64
+streamforge-macos-x64
 streamforge-linux-x64
 streamforge-macos-x64
 streamforge-macos-arm64
 streamforge-win-x64.exe
+
 
 # Archive & backups
 *.zip

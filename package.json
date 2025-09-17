@@ -1,13 +1,21 @@
 {
-  "name": "streamforge",
+  "name": "@schmittdev/streamforge",
   "version": "0.6.0",
+  "license": "MIT",
   "author": "SchmittDEV",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "start": "node src/server.js"
+  "bin": {
+    "streamforge": "./src/server.js"
   },
-
+  "publishConfig": { "access": "public" },
+  "files": ["src", "public", "README.md", "LICENSE", "package.json"],
+  "type": "module",
+  "packageManager": "npm@10.8.2",
+  "scripts": {
+    "dev": "node src/server.js",
+    "build": "mkdir -p dist && echo built > dist/.keep",
+    "package:portable": "bash scripts/package-portable.sh",
+    "package:sfx": "bash scripts/package-sfx.sh"
+  },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
     "body-parser": "^1.20.3",
@@ -18,28 +26,5 @@
     "saxes": "^6.0.0"
   },
   "devDependencies": {
-    "autoprefixer": "^10.4.21",
-    "pkg": "^5.8.1"
-  },
-
-  "bin": "src/server.js",
-  "pkg": {
-    "scripts": [
-      "src/**/*.js",
-      "public/**/*"
-    ],
-    "assets": [
-      "public/**/*"
-    ],
-    "targets": [
-      "node18-linux-x64",
-      "node18-macos-arm64",
-      "node18-macos-x64",
-      "node18-win-x64"
-    ],
-    "outputPath": "dist"
-  },
-  "scripts": {
-    "build:bin": "pkg ."
   }
 }

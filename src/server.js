@@ -1,4 +1,7 @@
+#!/usr/bin/env node
+
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -14,12 +17,21 @@ import { fetchXtreamChannels } from './xtream.js';
 import { refreshEPG, readCombinedIndex, readCombinedIdNames, getMergedFilePath } from './epg.js';
 import { getDiscover, getLineupStatus, getLineup } from './hdhr.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const ROOT = process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..');
+
+export const PUBLIC_DIR = path.join(ROOT, 'public');
+export const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
+
 const app = express();
+
 app.use(cors());
 app.use(morgan('dev'));
 app.use(bodyParser.json());
 
-app.use('/web', express.static('public'));
+app.use('/web', express.static(PUBLIC_DIR));
 
 app.get('/favicon.ico', (req, res) =>
   res.sendFile(path.resolve('public/favicon.ico'))
