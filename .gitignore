@@ -64,3 +64,6 @@ streamforge-win-x64.exe
 
 # Git backups
 *.orig
+
+# exclusiv
+tools/
