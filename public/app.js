@@ -1,3 +1,12 @@
+let GLOBAL_EPG_SOURCES = null;
+
+async function getEpgSourcesCached() {
+  if (GLOBAL_EPG_SOURCES) return GLOBAL_EPG_SOURCES;
+  GLOBAL_EPG_SOURCES = await fetchJSON('/api/epg/sources');
+  return GLOBAL_EPG_SOURCES;
+}
+
+
 async function fetchJSON(url, opts){
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(await r.text());
@@ -34,6 +43,98 @@ let ALL_CH = [];
 let EPG_IDX = [];
 let ID_NAMES = [];
 
+// === Robustheits-Helpers ===
+function toArray(val){
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === 'object') return Object.values(val);
+  return [];
+}
+
+function parseM3U(text){
+  const lines = String(text || '').split(/\r?\n/);
+  const arr = [];
+  let cur = {};
+  for (const lineRaw of lines){
+    const line = lineRaw.trim();
+    if (!line) continue;
+    if (line.startsWith('#EXTINF:')){
+      const nameMatch = line.split(',').slice(-1)[0];
+      const name = nameMatch ? nameMatch.trim() : 'Channel';
+      const groupMatch = /group-title="([^"]*)"/i.exec(line);
+      const group = groupMatch ? groupMatch[1] : null;
+      const tvgIdMatch = /tvg-id="([^"]*)"/i.exec(line);
+      const tvg_id = tvgIdMatch ? tvgIdMatch[1] : null;
+      const logoMatch = /tvg-logo="([^"]*)"/i.exec(line);
+      const logo = logoMatch ? logoMatch[1] : null;
+      const chnoMatch = /tvg-chno="([^"]*)"/i.exec(line);
+      const chno = chnoMatch ? chnoMatch[1] : null;
+      cur = { name, group_name: group, tvg_id, logo, number: chno ? Number(chno) : null };
+    } else if (!line.startsWith('#')){
+      arr.push({ ...cur, url: line });
+      cur = {};
+    }
+  }
+  return arr;
+}
+
+// ---- Paging-State + UI ----
+let PAGING = { page: 1, limit: 100, total: 0, pages: 0 };
+
+function ensurePagerBar(){
+  const host = document.getElementById('groupedChannels');
+  if (!host) return;
+  // Falls schon vorhanden, nichts tun
+  if (document.getElementById('pagerBar')) return;
+
+  const bar = document.createElement('div');
+  bar.id = 'pagerBar';
+  bar.className = 'mb-3 flex items-center gap-3 text-sm';
+  bar.innerHTML = `
+    <button id="pagerPrev" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700">◀</button>
+    <span id="pagerInfo" class="text-slate-300">Seite 1 / 1 • 0 Einträge</span>
+    <button id="pagerNext" class="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700">▶</button>
+    <span class="ml-3 text-slate-400">Pro Seite:</span>
+    <select id="pageSize" class="px-2 py-1 rounded bg-slate-800">
+      <option value="50">50</option>
+      <option value="100" selected>100</option>
+      <option value="200">200</option>
+      <option value="500">500</option>
+    </select>
+  `;
+  host.parentElement.insertBefore(bar, host);
+
+  // Events
+  document.getElementById('pagerPrev').addEventListener('click', ()=>{
+    if (PAGING.page > 1) loadChannelsPage(PAGING.page - 1);
+  });
+  document.getElementById('pagerNext').addEventListener('click', ()=>{
+    if (PAGING.page < PAGING.pages) loadChannelsPage(PAGING.page + 1);
+  });
+  document.getElementById('pageSize').addEventListener('change', (e)=>{
+    PAGING.limit = Number(e.target.value) || 100;
+    loadChannelsPage(1);
+  });
+}
+
+function updatePagerUI(){
+  const info = document.getElementById('pagerInfo');
+  if (!info) return;
+  info.textContent = `Seite ${PAGING.page} / ${Math.max(1,PAGING.pages)} • ${PAGING.total} Einträge`;
+  document.getElementById('pagerPrev')?.toggleAttribute('disabled', PAGING.page <= 1);
+  document.getElementById('pagerNext')?.toggleAttribute('disabled', PAGING.page >= PAGING.pages);
+}
+
+function loadChannelsPage(nextPage){
+  return loadChannelsMapping({ page: nextPage, limit: PAGING.limit });
+}
+
+let FILTERS = { q: "", group: "" };
+
+function debounce(fn, wait = 250){
+  let t; 
+  return (...args) => { clearTimeout(t); t = setTimeout(()=>fn(...args), wait); };
+}
+
 async function checkWizard(){
   try {
     const s = await fetchJSON('/api/status');
@@ -51,13 +152,23 @@ async function loadSources(){
   if (m.length){
     parts.push('<div class="mb-2 font-semibold text-slate-300">M3U Sources</div>');
     for (const s of m){
-      parts.push(`<div class="flex items-center justify-between text-xs bg-slate-800/60 rounded p-2 mb-1"><div class="truncate"><b>${s.name}</b> — ${s.url}</div><button data-type="m3u" data-id="${s.id}" class="delSource px-2 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button></div>`);
+      parts.push(
+        `<div class="flex items-center justify-between text-xs bg-slate-800/60 rounded p-2 mb-1">
+          <div class="truncate"><b>${s.name}</b> — ${s.url}</div>
+          <button data-type="m3u" data-id="${s.id}" class="delSource px-2 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button>
+        </div>`
+      );
     }
   }
   if (x.length){
     parts.push('<div class="mt-3 mb-2 font-semibold text-slate-300">Xtream Sources</div>');
     for (const s of x){
-      parts.push(`<div class="flex items-center justify-between text-xs bg-slate-800/60 rounded p-2 mb-1"><div class="truncate"><b>${s.name}</b> — ${s.base_url}</div><button data-type="xtream" data-id="${s.id}" class="delSource px-2 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button></div>`);
+      parts.push(
+        `<div class="flex items-center justify-between text-xs bg-slate-800/60 rounded p-2 mb-1">
+          <div class="truncate"><b>${s.name}</b> — ${s.base_url}</div>
+          <button data-type="xtream" data-id="${s.id}" class="delSource px-2 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button>
+        </div>`
+      );
     }
   }
   wrapM.innerHTML = parts.join('') || 'No sources yet.';
@@ -88,8 +199,13 @@ async function loadEPGSources(){
   try{
     const list = await fetchJSON('/api/epg/sources');
     host.innerHTML = list.map(x => {
-      const badge = x.status === 'active' ? '<span class="ml-2 text-xs px-2 py-1 rounded bg-emerald-700">active</span>' : '<span class="ml-2 text-xs px-2 py-1 rounded bg-red-700">pending</span>';
-      return `<div class="flex items-center justify-between bg-slate-800/60 rounded p-2"><div class="truncate"><b>${x.name}</b> — ${x.url}</div><div>${badge}</div></div>`;
+      const badge = x.status === 'active'
+        ? '<span class="ml-2 text-xs px-2 py-1 rounded bg-emerald-700">active</span>'
+        : '<span class="ml-2 text-xs px-2 py-1 rounded bg-red-700">pending</span>';
+      return `<div class="flex items-center justify-between bg-slate-800/60 rounded p-2">
+        <div class="truncate"><b>${x.name}</b> — ${x.url}</div>
+        <div>${badge}</div>
+      </div>`;
     }).join('') || '<div class="text-slate-400">Keine EPG Quellen.</div>';
   }catch(e){ host.innerHTML = '<div class="text-red-400">Fehler beim Laden der EPG-Liste</div>'; }
 }
@@ -106,7 +222,8 @@ function groupMap(chs){
 
 function ensureGroupOptions(){
   const sel = document.getElementById('groupFilter'); if (!sel) return;
-  const names = Array.from(new Set(ALL_CH.map(c => c.group_name).filter(Boolean))).sort();
+  const list = Array.isArray(ALL_CH) ? ALL_CH : toArray(ALL_CH);
+  const names = Array.from(new Set(list.map(c => c?.group_name).filter(Boolean))).sort();
   sel.innerHTML = '<option value="">Alle Gruppen</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
 }
 
@@ -136,18 +253,15 @@ function epgSuggest(term){
   return hits;
 }
 
-function applyFilterAndSearch(){
+const applyFilterAndSearch = debounce(()=>{
   const sEl = document.getElementById('searchBox');
   const gEl = document.getElementById('groupFilter');
-  const host = document.getElementById('groupedChannels');
-  if (!sEl || !gEl || !host) return;
-  const term = (sEl.value||'').toLowerCase().trim();
-  const gf = gEl.value;
-  let list = ALL_CH; // alle standardmäßig angezeigt; enabled wird per Checkbox gesteuert
-  if (gf) list = list.filter(c => (c.group_name||'') === gf);
-  if (term) list = list.filter(c => String(c.name).toLowerCase().includes(term) || String(c.tvg_id||'').toLowerCase().includes(term));
-  renderGrouped(list);
-}
+  FILTERS.q = (sEl?.value || "").trim();
+  FILTERS.group = gEl?.value || "";
+
+  // nur EINE Netz-Anfrage (Seite 1), KEIN renderGrouped hier!
+  loadChannelsMapping({ page: 1, q: FILTERS.q, group: FILTERS.group });
+}, 250);
 
 function renderGrouped(chs){
   const host = document.getElementById('groupedChannels'); if (!host) return;
@@ -190,15 +304,24 @@ function renderGrouped(chs){
       `;
 
       // populate epg source select
-      (async ()=>{
-        try {
-          const sel = right.querySelector('.epgSourceSel');
-          const list = await fetchJSON('/api/epg/sources');
-          for (const it of list){ const opt = document.createElement('option'); opt.value = it.name; opt.textContent = it.name; sel.appendChild(opt); }
-          const d = document.createElement('option'); d.value = 'SF Dummy'; d.textContent = 'SF Dummy'; sel.appendChild(d);
-          if (ch.epg_source){ sel.value = ch.epg_source; }
-        } catch {}
-      })();
+            (async ()=>{
+              try {
+                const sel = right.querySelector('.epgSourceSel');
+                const list = await getEpgSourcesCached();  // <-- Nur 1x geladen und gecached
+                for (const it of list){ 
+                  const opt = document.createElement('option'); 
+                  opt.value = it.name; 
+                  opt.textContent = it.name; 
+                  sel.appendChild(opt); 
+                }
+                const d = document.createElement('option'); 
+                d.value = 'SF Dummy'; 
+                d.textContent = 'SF Dummy'; 
+                sel.appendChild(d);
+                if (ch.epg_source){ sel.value = ch.epg_source; }
+              } catch {}
+            })();
+
 
       const sugg = document.createElement('div');
       sugg.className = 'text-xs text-slate-300 grid grid-cols-2 gap-2 mt-2 hidden';
@@ -208,7 +331,11 @@ function renderGrouped(chs){
         const epgSel = right.querySelector('.epgSourceSel');
         const val = (inp && inp.value) ? inp.value.trim() : '';
         if (!val){ showToast('Bitte zuerst EPG-ID eintippen oder wählen', 'warn'); return; }
-        await fetchJSON('/api/channels/'+ch.id+'/assign-epg', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tvg_id: val, epg_source: epgSel?.value||null }) });
+        await fetchJSON('/api/channels/'+ch.id+'/assign-epg', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ tvg_id: val, epg_source: epgSel?.value||null })
+        });
         showToast('EPG zugewiesen');
         await loadChannelsMapping();
       };
@@ -217,7 +344,11 @@ function renderGrouped(chs){
 
       right.querySelector('.assignBtn').addEventListener('click', assign);
       right.querySelector('.toggleEnabled').addEventListener('change', async (e)=>{
-        await fetchJSON('/api/channels/'+ch.id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: e.target.checked }) });
+        await fetchJSON('/api/channels/'+ch.id, {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ enabled: e.target.checked })
+        });
       });
       const epgInput = right.querySelector('.epgSearch');
       epgInput.addEventListener('input', (e)=>{
@@ -246,18 +377,62 @@ function renderGrouped(chs){
   bindBulkControls();
 }
 
-async function loadChannelsMapping(){
+async function loadChannelsMapping({ page, limit, q, group } = {}){
   try {
-    const list = await fetchJSON('/api/channels');
-    ALL_CH = list;
+    showLoading(true);
+    ensurePagerBar();
+
+    if (typeof q === 'string') FILTERS.q = q;
+    if (typeof group === 'string') FILTERS.group = group;
+
+    const p = Number(page ?? PAGING.page ?? 1);
+    const l = Number(limit ?? PAGING.limit ?? 100);
+
+    const u = new URL('/api/channels', location.origin);
+    u.searchParams.set('page', String(p));
+    u.searchParams.set('limit', String(l));
+    if (FILTERS.q)     u.searchParams.set('q', FILTERS.q);
+    if (FILTERS.group) u.searchParams.set('group', FILTERS.group);
+
+    const r = await fetch(u, { cache: 'no-cache' });
+    const payload = await r.json();
+    const rows = Array.isArray(payload) ? payload
+               : Array.isArray(payload?.rows) ? payload.rows
+               : [];
+
+    PAGING.page  = Number((Array.isArray(payload) ? p : payload?.page)  ?? p);
+    PAGING.limit = Number((Array.isArray(payload) ? l : payload?.limit) ?? l);
+    PAGING.total = Number((Array.isArray(payload) ? rows.length : payload?.total) ?? rows.length);
+    PAGING.pages = Math.max(1, Math.ceil(PAGING.total / Math.max(1, PAGING.limit)));
+
+    ALL_CH = rows.map(ch => ({
+      id: ch.id ?? ch.channel_id ?? ch.stream_id ?? null,
+      name: ch.name ?? ch.channelName ?? 'Channel',
+      group_name: ch.group_name ?? ch.group ?? ch.category_name ?? '',
+      tvg_id: ch.tvg_id ?? ch.epg_channel_id ?? '',
+      logo: ch.logo ?? ch.tvg_logo ?? '',
+      number: (ch.number != null) ? Number(ch.number) : null,
+      url: ch.url ?? ch.stream_url ?? '',
+      enabled: ch.enabled ?? ch.enable ?? false,
+      epg_source: ch.epg_source ?? null,
+    })).filter(ch => ch.url);
+
+    updatePagerUI();
     ensureGroupOptions();
-    applyFilterAndSearch();
-  } catch (e) { console.error(e); }
+    renderGrouped(ALL_CH); // <— nur rendern
+  } catch(e){
+    console.error(e);
+    ALL_CH = [];
+    renderGrouped(ALL_CH);
+  } finally {
+    showLoading(false);
+  }
 }
 
 function getSelectedIds(){
   return Array.from(document.querySelectorAll('.rowSelect:checked')).map(x => Number(x.getAttribute('data-id')));
 }
+
 function bindBulkControls(){
   const selAll = document.getElementById('selectAll');
   const bulkEn = document.getElementById('bulkEnable');
@@ -269,20 +444,32 @@ function bindBulkControls(){
   });
   bulkEn?.addEventListener('click', async ()=>{
     const ids = getSelectedIds(); if (!ids.length) return showToast('Keine Kanäle ausgewählt','warn');
-    await fetchJSON('/api/channels/bulk', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids, action:'enable' }) });
+    await fetchJSON('/api/channels/bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids, action:'enable' })
+    });
     showToast('Aktiviert');
     await loadChannelsMapping();
   });
   bulkDis?.addEventListener('click', async ()=>{
     const ids = getSelectedIds(); if (!ids.length) return showToast('Keine Kanäle ausgewählt','warn');
-    await fetchJSON('/api/channels/bulk', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids, action:'disable' }) });
+    await fetchJSON('/api/channels/bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids, action:'disable' })
+    });
     showToast('Deaktiviert');
     await loadChannelsMapping();
   });
   bulkNum?.addEventListener('click', async ()=>{
     const ids = getSelectedIds(); if (!ids.length) return showToast('Keine Kanäle ausgewählt','warn');
     const start = Number(document.getElementById('startNumber')?.value || 0);
-    await fetchJSON('/api/channels/bulk', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids, action:'renumber', startNumber: start }) });
+    await fetchJSON('/api/channels/bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids, action:'renumber', startNumber: start })
+    });
     showToast('Nummern gesetzt');
     await loadChannelsMapping();
   });
@@ -296,38 +483,88 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     newBtn?.addEventListener('click', (e)=>{ e.preventDefault(); m3uForm?.classList.toggle('hidden'); });
 
     document.getElementById('refreshBtn')?.addEventListener('click', async ()=>{
-      try { showLoading(true); const p = fetchJSON('/api/refresh', { method:'POST' });
-        const timer = setInterval(async ()=>{ try{ const s = await fetchJSON('/api/epg/status'); if (s.running){ const txt = s.phase==='download' ? `EPG: ${s.current}/${s.total}` : (`EPG: ${s.phase||''}`); showToast(txt); } } catch(_){} }, 1500);
-        await p; clearInterval(timer); await loadChannelsMapping(); await loadEPGSources(); showToast('Refresh abgeschlossen'); }
-      catch(e){ showToast(e.message || 'Refresh fehlgeschlagen', 'error'); }
-      finally { showLoading(false); }
+      try {
+        showLoading(true);
+        const p = fetchJSON('/api/refresh', { method:'POST' });
+        const timer = setInterval(async ()=>{
+          try{
+            const s = await fetchJSON('/api/epg/status');
+            if (s.running){
+              const txt = s.phase==='download' ? `EPG: ${s.current}/${s.total}` : (`EPG: ${s.phase||''}`);
+              showToast(txt);
+            }
+          } catch(_){}
+        }, 1500);
+        await p;
+        clearInterval(timer);
+        await loadChannelsMapping();
+        await loadEPGSources();
+        showToast('Refresh abgeschlossen');
+      } catch(e){
+        showToast(e.message || 'Refresh fehlgeschlagen', 'error');
+      } finally { showLoading(false); }
     });
 
     const m3uFormEl = document.getElementById('m3uForm');
     m3uFormEl?.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      try { showLoading(true); const fd = new FormData(m3uFormEl);
-        await fetchJSON('/api/sources/m3u', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(fd.entries())) });
-        m3uFormEl.reset(); await loadSources(); await loadChannelsMapping(); await checkWizard(); showToast('M3U hinzugefügt & aktualisiert');
-      } catch (err){ showToast(err.message || 'Fehler beim Hinzufügen', 'error'); } finally { showLoading(false); }
+      try {
+        showLoading(true);
+        const fd = new FormData(m3uFormEl);
+        await fetchJSON('/api/sources/m3u', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(Object.fromEntries(fd.entries()))
+        });
+        m3uFormEl.reset();
+        await loadSources();
+        await loadChannelsMapping();
+        await checkWizard();
+        showToast('M3U hinzugefügt & aktualisiert');
+      } catch (err){
+        showToast(err.message || 'Fehler beim Hinzufügen', 'error');
+      } finally { showLoading(false); }
     });
 
     const xtForm = document.getElementById('xtreamForm');
     xtForm?.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      try { showLoading(true); const fd = new FormData(xtForm);
-        await fetchJSON('/api/sources/xtream', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(fd.entries())) });
-        xtForm.reset(); await loadSources(); await loadChannelsMapping(); await checkWizard(); showToast('Xtream hinzugefügt & aktualisiert');
-      } catch (err){ showToast(err.message || 'Fehler beim Hinzufügen', 'error'); } finally { showLoading(false); }
+      try {
+        showLoading(true);
+        const fd = new FormData(xtForm);
+        await fetchJSON('/api/sources/xtream', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(Object.fromEntries(fd.entries()))
+        });
+        xtForm.reset();
+        await loadSources();
+        await loadChannelsMapping();
+        await checkWizard();
+        showToast('Xtream hinzugefügt & aktualisiert');
+      } catch (err){
+        showToast(err.message || 'Fehler beim Hinzufügen', 'error');
+      } finally { showLoading(false); }
     });
 
     const epgForm = document.getElementById('epgForm');
     epgForm?.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      try { showLoading(true); const fd = new FormData(epgForm);
-        await fetchJSON('/api/epg', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(fd.entries())) });
-        epgForm.reset(); await loadEPGSources(); await checkWizard(); showToast('EPG hinzugefügt');
-      } catch (err){ showToast(err.message || 'Fehler beim Hinzufügen', 'error'); } finally { showLoading(false); }
+      try {
+        showLoading(true);
+        const fd = new FormData(epgForm);
+        await fetchJSON('/api/epg', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(Object.fromEntries(fd.entries()))
+        });
+        epgForm.reset();
+        await loadEPGSources();
+        await checkWizard();
+        showToast('EPG hinzugefügt');
+      } catch (err){
+        showToast(err.message || 'Fehler beim Hinzufügen', 'error');
+      } finally { showLoading(false); }
     });
 
     document.getElementById('wizardClose')?.addEventListener('click', ()=> document.getElementById('setupWizard')?.classList.add('hidden'));
@@ -337,14 +574,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 
     window.addEventListener('hashchange', async ()=>{
       const page = (location.hash.replace('#/','')||'playlist');
-      if (page === 'mapping'){ await loadEPGIndex(); await loadChannelsMapping(); }
+      if (page === 'mapping'){ await loadEPGIndex(); await loadChannelsMapping({ page: 1 }); }
       if (page === 'xmltv'){ await loadEPGSources(); }
     });
 
     await loadSources();
     await loadEPGIndex();
     await loadEPGSources();
-    await loadChannelsMapping();
+    await loadChannelsMapping({ page: 1 }); // nur Seite 1 laden
     await checkWizard();
   } catch (e){
     console.error(e);

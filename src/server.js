@@ -9,6 +9,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import bodyParser from 'body-parser';
 import fetch from 'node-fetch';
+import compression from 'compression';
 
 import cfg from './config.js';
 import db from './db.js';
@@ -27,9 +28,13 @@ export const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 
 const app = express();
 
+app.set('etag', false);
+app.use((req,res,next)=>{ res.set('Cache-Control','no-store'); next(); });
+
 app.use(cors());
 app.use(morgan('dev'));
 app.use(bodyParser.json());
+app.use(compression());
 
 app.use('/web', express.static(PUBLIC_DIR));
 
@@ -195,17 +200,36 @@ app.get('/api/epg/channels', (req,res)=>{
   res.json(out);
 });
 
-app.get('/api/channels', (req,res)=>{
-  let rows = db.prepare('SELECT * FROM channels ORDER BY COALESCE(number, 9999), name').all();
-  // lazy auto-map using combined index
-  const idx = readCombinedIndex();
-  const norm = s => (s||'').toLowerCase().replace(/\s+/g,' ').trim();
-  let changed = false;
-  for (const r of rows){
-    if (!r.tvg_id){ const id = idx[norm(r.name)]; if (id){ db.prepare('UPDATE channels SET tvg_id=? WHERE id=?').run(id, r.id); r.tvg_id = id; changed = true; } }
+// GET /api/channels?page=1&limit=100&search=sky&group=Movies&enabled=1&fields=id,name,number,group_name,tvg_id
+app.get('/api/channels', (req, res) => {
+  const page  = Math.max(1, Number(req.query.page||1));
+  const limit = Math.min(1000, Math.max(1, Number(req.query.limit||100)));
+  const q     = (req.query.q||'').trim();
+  const group = (req.query.group||'').trim();
+
+  let where = 'WHERE 1=1';
+  const params = [];
+  if (q){
+    where += ' AND (name LIKE ? OR tvg_id LIKE ?)';
+    params.push(`%${q}%`, `%${q}%`);
   }
-  res.json(rows);
+  if (group){
+    where += ' AND group_name = ?';
+    params.push(group);
+  }
+
+  const off = (page-1)*limit;
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM channels ${where}`).get(...params).n;
+  const rows = db.prepare(
+    `SELECT id, name, url, number, group_name, logo, tvg_id, epg_source, enabled
+     FROM channels ${where}
+     ORDER BY name ASC
+     LIMIT ? OFFSET ?`
+  ).all(...params, limit, off);
+
+  res.json({ page, limit, total, rows });
 });
+
 
 app.patch('/api/channels/:id', (req,res)=>{
   const { id } = req.params;
@@ -382,4 +406,9 @@ app.post('/api/mapping/auto', (req,res)=>{
   }
 
   res.json({ ok:true, updated, skipped, minScore, sample:samples });
+});
+
+app.get('/api/channels/groups', (req,res)=>{
+  const rows = db.prepare('SELECT group_name g, COUNT(*) c FROM channels WHERE group_name IS NOT NULL GROUP BY group_name ORDER BY g').all();
+  res.json(rows);
 });

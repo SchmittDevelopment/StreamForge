@@ -6,8 +6,16 @@
   "bin": {
     "streamforge": "./src/server.js"
   },
-  "publishConfig": { "access": "public" },
-  "files": ["src", "public", "README.md", "LICENSE", "package.json"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "public",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "type": "module",
   "packageManager": "npm@10.8.2",
   "scripts": {
@@ -19,12 +27,11 @@
   "dependencies": {
     "better-sqlite3": "^9.4.0",
     "body-parser": "^1.20.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "morgan": "^1.10.0",
     "node-fetch": "^3.3.2",
     "saxes": "^6.0.0"
-  },
-  "devDependencies": {
   }
 }
