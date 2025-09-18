@@ -261,21 +261,20 @@ async function enableChannel(id, dropIndex){
 
 async function disableChannel(id){
   try {
-        await fetchJSON('/api/channels/'+id, {
-          method:'PATCH',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ enabled:true, insertAt: dropIndex+1 }) // dropIndex war 0-basiert
-        });
-        await loadRight();
+    await fetchJSON('/api/channels/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false })
+    });
     showToast('Entfernt');
+    // server vergibt Nummern neu → einfach rechts neu laden
     await Promise.all([loadLeft(), loadRight()]);
-    renumberRightLocal(Number(document.getElementById('startNumberDual')?.value||1));
-    persistRightOrderDebounced();
-  } catch(e){
+  } catch (e){
     console.error(e);
-    showToast('Konnte nicht entfernen','error');
+    showToast('Konnte nicht entfernen', 'error');
   }
 }
+
 
 function reorderRight(id, dropIndex){
   const i = RIGHT_ROWS.findIndex(x => x.id === id);
