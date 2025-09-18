@@ -201,33 +201,58 @@ app.get('/api/epg/channels', (req,res)=>{
 });
 
 // GET /api/channels?page=1&limit=100&search=sky&group=Movies&enabled=1&fields=id,name,number,group_name,tvg_id
+// Express-Route: /api/channels
 app.get('/api/channels', (req, res) => {
-  const page  = Math.max(1, Number(req.query.page||1));
-  const limit = Math.min(1000, Math.max(1, Number(req.query.limit||100)));
-  const q     = (req.query.q||'').trim();
-  const group = (req.query.group||'').trim();
+  try {
+    const page    = Math.max(1, Number(req.query.page || 1));
+    const limit   = Math.min(1000, Math.max(1, Number(req.query.limit || 100)));
+    const q       = (req.query.q || '').trim();
+    const group   = (req.query.group || '').trim();
+    const enabled = String(req.query.enabled || '').trim().toLowerCase(); // "1" | "true" → enabled only
 
-  let where = 'WHERE 1=1';
-  const params = [];
-  if (q){
-    where += ' AND (name LIKE ? OR tvg_id LIKE ?)';
-    params.push(`%${q}%`, `%${q}%`);
+    // optionales Sorting
+    const sortAllowed = new Set(['name', 'number', 'group_name', 'id']);
+    const sort = sortAllowed.has(String(req.query.sort || '').trim()) ? String(req.query.sort).trim() : 'name';
+    const dir  = String(req.query.dir || 'asc').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+
+    let where = 'WHERE 1=1';
+    const params = [];
+
+    if (q) {
+      where += ' AND (name LIKE ? OR tvg_id LIKE ?)';
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (group) {
+      where += ' AND (group_name = ?)';
+      params.push(group);
+    }
+    if (enabled === '1' || enabled === 'true') {
+      where += ' AND (enabled = 1)';
+    }
+
+    const offset = (page - 1) * limit;
+
+    // total ermitteln
+    const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM channels ${where}`).get(...params);
+    const total = Number(totalRow?.n || 0);
+
+    // page rows
+    const stmt = db.prepare(`
+      SELECT id, name, url, number, group_name, logo, tvg_id, epg_source, enabled
+      FROM channels
+      ${where}
+      ORDER BY ${sort} ${dir}
+      LIMIT ? OFFSET ?
+    `);
+    const rows = stmt.all(...params, limit, offset);
+
+    // Kein Cache → vermeidet 304-Spam bei UI-Reloads
+    res.set('Cache-Control', 'no-store');
+    res.json({ page, limit, total, rows });
+  } catch (err) {
+    console.error('[GET /api/channels] error:', err);
+    res.status(500).json({ error: 'db_error', message: 'Failed to query channels' });
   }
-  if (group){
-    where += ' AND group_name = ?';
-    params.push(group);
-  }
-
-  const off = (page-1)*limit;
-  const total = db.prepare(`SELECT COUNT(*) AS n FROM channels ${where}`).get(...params).n;
-  const rows = db.prepare(
-    `SELECT id, name, url, number, group_name, logo, tvg_id, epg_source, enabled
-     FROM channels ${where}
-     ORDER BY name ASC
-     LIMIT ? OFFSET ?`
-  ).all(...params, limit, off);
-
-  res.json({ page, limit, total, rows });
 });
 
 
