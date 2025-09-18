@@ -616,6 +616,9 @@ function renderDualPane(){
   document.getElementById('saveOrder').onclick = saveRightOrder;
 }
 
+let isRefreshing = false;
+let epgPollAbort = null;
+
 // -------------------- Page init --------------------
 document.addEventListener('DOMContentLoaded', async ()=>{
   try {
@@ -624,23 +627,62 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     newBtn?.addEventListener('click', (e)=>{ e.preventDefault(); m3uForm?.classList.toggle('hidden'); });
 
     document.getElementById('refreshBtn')?.addEventListener('click', async ()=>{
-      try { 
-        showLoading(true); 
-        const p = fetchJSON('/api/refresh', { method:'POST' });
-        const timer = setInterval(async ()=>{ 
-          try{ 
-            const s = await fetchJSON('/api/epg/status'); 
-            if (s.running){ 
-              const txt = s.phase==='download' ? `EPG: ${s.current}/${s.total}` : (`EPG: ${s.phase||''}`); 
-              showToast(txt); 
-            } 
-          } catch(_){} 
-        }, 1500);
-        await p; clearInterval(timer); await loadEPGSources(); showToast('Refresh abgeschlossen'); 
+      if (isRefreshing) { showToast('Refresh läuft schon…', 'warn'); return; }
+      isRefreshing = true;
+
+      const btn = document.getElementById('refreshBtn');
+      btn && (btn.disabled = true);
+
+      const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
+      epgPollAbort?.abort(); // evtl. alten Poll abbrechen
+      epgPollAbort = new AbortController();
+      const { signal } = epgPollAbort;
+
+      // bricht den Poll ab, z. B. beim Seitenwechsel
+      const stopPolling = () => { try{ epgPollAbort.abort(); }catch{} };
+
+      const onHash = ()=> stopPolling();
+      const onHide = ()=> {/* optional: nix */};
+      window.addEventListener('hashchange', onHash);
+      document.addEventListener('visibilitychange', onHide);
+
+      try {
+        showLoading(true);
+
+        // Refresh anstoßen
+        const refreshReq = fetchJSON('/api/refresh', { method:'POST', signal });
+
+        // Einziger Poll-Loop (kein setInterval!)
+        while (true) {
+          if (signal.aborted) break;
+          try {
+            const s = await fetchJSON('/api/epg/status', { cache:'no-store', signal });
+            if (!s || !s.running) break; // fertig
+            // Optional: dezente Live-Info
+            // console.log(`EPG: ${s.phase||''} ${s.current||0}/${s.total||0}`);
+          } catch { /* kurzzeitige Fehler ignorieren */ }
+
+          // Schonung, wenn Tab nicht sichtbar
+          await sleep(document.visibilityState === 'visible' ? 1500 : 5000);
+        }
+
+        // Refresh Ende abwarten (falls der Request länger war)
+        try { await refreshReq; } catch { /* Fehlerhandling unten */ }
+
+        await loadChannelsMapping();
+        await loadEPGSources();
+        showToast('Refresh abgeschlossen');
+      } catch (e){
+        if (!signal.aborted) showToast(e?.message || 'Refresh fehlgeschlagen', 'error');
+      } finally {
+        isRefreshing = false;
+        btn && (btn.disabled = false);
+        showLoading(false);
+        window.removeEventListener('hashchange', onHash);
+        document.removeEventListener('visibilitychange', onHide);
       }
-      catch(e){ showToast(e.message || 'Refresh fehlgeschlagen', 'error'); }
-      finally { showLoading(false); }
     });
+
 
     m3uForm?.addEventListener('submit', async (e)=>{
       e.preventDefault();
