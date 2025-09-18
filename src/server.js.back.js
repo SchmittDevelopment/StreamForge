@@ -1,33 +1,5 @@
 #!/usr/bin/env node
 
-// ---- DB compatibility wrapper (sqlite3 & better-sqlite3) ----
-// ---- DB compatibility wrapper (sqlite3 & better-sqlite3) ----
-function makeDb(db){
-  const isBetter = typeof db.prepare === 'function' && typeof db.exec === 'function';
-
-  if (isBetter){
-    // better-sqlite3: sync API → einfache Promise-Hülle, aber KEINE Self-Calls!
-    return {
-      exec(sql){ db.exec(sql); return Promise.resolve(); },
-      run(sql, params = []){ db.prepare(sql).run(...params); return Promise.resolve(); },
-      all(sql, params = []){ const rows = db.prepare(sql).all(...params); return Promise.resolve(rows); },
-      get(sql, params = []){ const row  = db.prepare(sql).get(...params); return Promise.resolve(row); },
-    };
-  }
-
-  // node-sqlite3 callbacks → Promise-API
-  const exec = (sql) => new Promise((resolve, reject)=> db.exec(sql, (err)=> err ? reject(err) : resolve()));
-  const run  = (sql, params=[]) => new Promise((resolve, reject)=> db.run(sql, params, function(err){ err ? reject(err) : resolve(this); }));
-  const all  = (sql, params=[]) => new Promise((resolve, reject)=> db.all(sql, params, (err, rows)=> err ? reject(err) : resolve(rows)));
-  const get  = (sql, params=[]) => new Promise((resolve, reject)=> db.get(sql, params, (err, row)=> err ? reject(err) : resolve(row)));
-
-  return { exec, run, all, get };
-}
-
-const DB = makeDb(db);
-
-
-
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -230,35 +202,6 @@ app.get('/api/epg/channels', (req,res)=>{
 
 // GET /api/channels?page=1&limit=100&search=sky&group=Movies&enabled=1&fields=id,name,number,group_name,tvg_id
 // Express-Route: /api/channels
-
-// ---- numbering helpers ----
-async function compactNumbers(){
-  const rows = await DB.all(`
-    SELECT id FROM channels
-    WHERE enabled = 1
-    ORDER BY CASE WHEN number IS NULL THEN 1 ELSE 0 END, number, id
-  `);
-  let n = 1;
-  for (const r of rows){
-    await DB.run(`UPDATE channels SET number = ? WHERE id = ?`, [n, r.id]);
-    n++;
-  }
-}
-async function insertAtPosition(id, index){
-  await DB.run(`
-    UPDATE channels
-    SET number = number + 1
-    WHERE enabled = 1 AND number IS NOT NULL AND number >= ?
-  `, [index]);
-  await DB.run(`UPDATE channels SET enabled = 1, number = ? WHERE id = ?`, [index, id]);
-  await compactNumbers();
-}
-async function appendToEnd(id){
-  const row = await DB.get(`SELECT COALESCE(MAX(number),0) AS mx FROM channels WHERE enabled = 1`);
-  const next = (row?.mx || 0) + 1;
-  await DB.run(`UPDATE channels SET enabled = 1, number = ? WHERE id = ?`, [next, id]);
-}
-
 app.get('/api/channels', (req, res) => {
   try {
     const page    = Math.max(1, Number(req.query.page || 1));
@@ -313,14 +256,15 @@ app.get('/api/channels', (req, res) => {
 });
 
 
-
 app.patch('/api/channels/:id', async (req, res) => {
   const id = Number(req.params.id);
   const { enabled, tvg_id, epg_source, insertAt } = req.body || {};
   try{
-    await DB.exec('BEGIN');
+    await db.run('BEGIN');
+
+    // EPG-Felder optional
     if (tvg_id !== undefined || epg_source !== undefined){
-      await DB.run(
+      await db.run(
         `UPDATE channels SET
            tvg_id = COALESCE(?, tvg_id),
            epg_source = COALESCE(?, epg_source)
@@ -328,80 +272,59 @@ app.patch('/api/channels/:id', async (req, res) => {
         [tvg_id ?? null, epg_source ?? null, id]
       );
     }
+
     if (enabled === true || enabled === 1){
       if (Number.isInteger(insertAt) && insertAt >= 1){
-        await insertAtPosition(id, insertAt);
+        await insertAtPosition(db, id, insertAt);
       } else {
-        await appendToEnd(id);
-        await compactNumbers();
+        await appendToEnd(db, id);
+        await compactNumbers(db); // falls nötig
       }
-    } else if (enabled === false || enabled === 0){
-      await DB.run(`UPDATE channels SET enabled = 0, number = NULL WHERE id = ?`, [id]);
-      await compactNumbers();
     }
-    await DB.exec('COMMIT');
+    if (enabled === false || enabled === 0){
+      // Disable: Nummer löschen
+      await db.run(`UPDATE channels SET enabled = 0, number = NULL WHERE id = ?`, [id]);
+      await compactNumbers(db); // Rest 1..N
+    }
+
+    await db.run('COMMIT');
     res.json({ ok:true });
   } catch(e){
-    await DB.exec('ROLLBACK');
+    await db.run('ROLLBACK');
     console.error(e);
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-
-app.post('/api/channels/:id/assign-epg', async (req,res)=>{
+app.post('/api/channels/:id/assign-epg', (req,res)=>{
   const { id } = req.params;
   const { tvg_id, epg_source } = req.body || {};
   if (!tvg_id) return res.status(400).json({ error: 'tvg_id required' });
-  const ch = await DB.get('SELECT * FROM channels WHERE id=?', [id]);
+  const ch = db.prepare('SELECT * FROM channels WHERE id=?').get(id);
   if (!ch) return res.status(404).json({ error: 'Not found' });
-  await DB.run('UPDATE channels SET tvg_id=?, epg_source=? WHERE id=?', [tvg_id, epg_source||null, id]);
+  db.prepare('UPDATE channels SET tvg_id=?, epg_source=? WHERE id=?').run(tvg_id, epg_source||null, id);
   res.json({ ok: true });
 });
 
-// Bulk-Aktionen (enable / disable / renumber)
-app.post('/api/channels/bulk', async (req,res)=>{
+app.post('/api/channels/bulk', (req,res)=>{
   const { ids, action, startNumber } = req.body || {};
-  if (!Array.isArray(ids) || !ids.length) {
-    return res.status(400).json({ error: 'ids required' });
-  }
-
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
   if (action === 'enable' || action === 'disable'){
     const en = action === 'enable' ? 1 : 0;
-    try{
-      await DB.exec('BEGIN');
-      for (const id of ids){
-        await DB.run('UPDATE channels SET enabled=? WHERE id=?', [en, id]);
-      }
-      await DB.exec('COMMIT');
-      return res.json({ ok: true, updated: ids.length });
-    }catch(e){
-      await DB.exec('ROLLBACK');
-      console.error(e);
-      return res.status(500).json({ error: String(e.message||e) });
-    }
+    const stmt = db.prepare('UPDATE channels SET enabled=? WHERE id=?');
+    const tx = db.transaction(arr => { for (const id of arr) stmt.run(en, id); });
+    tx(ids);
+    return res.json({ ok: true, updated: ids.length });
   }
-
   if (action === 'renumber'){
-    const start = Number(startNumber || 1);
-    try{
-      await DB.exec('BEGIN');
-      let n = start;
-      for (const id of ids){
-        await DB.run('UPDATE channels SET number=? WHERE id=?', [n++, id]);
-      }
-      await DB.exec('COMMIT');
-      return res.json({ ok:true, updated: ids.length });
-    }catch(e){
-      await DB.exec('ROLLBACK');
-      console.error(e);
-      return res.status(500).json({ error: String(e.message||e) });
-    }
+    let n = Number(startNumber ?? 0);
+    const stmt = db.prepare('UPDATE channels SET number=? WHERE id=?');
+    const tx = db.transaction(arr => { for (const id of arr) stmt.run(n++, id); });
+    tx(ids);
+    return res.json({ ok: true, updated: ids.length });
   }
-
   return res.status(400).json({ error: 'unknown action' });
 });
-
 
 app.get('/m3u', (req,res)=>{
   const rows = db.prepare('SELECT * FROM channels WHERE enabled=1 ORDER BY COALESCE(number, 9999), name').all();
@@ -548,18 +471,18 @@ app.post('/api/channels/order', async (req, res) => {
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
   try{
-    await DB.run('BEGIN');
+    await db.run('BEGIN');
     // erstmal alles auf NULL (nur enabled)
-    await DB.run(`UPDATE channels SET number = NULL WHERE enabled = 1`);
+    await db.run(`UPDATE channels SET number = NULL WHERE enabled = 1`);
     // dann in der gegebenen Reihenfolge 1..N setzen
     let n = 1;
     for (const id of ids){
-      await DB.run(`UPDATE channels SET number = ? WHERE id = ?`, [n++, id]);
+      await db.run(`UPDATE channels SET number = ? WHERE id = ?`, [n++, id]);
     }
-    await DB.run('COMMIT');
+    await db.run('COMMIT');
     res.json({ ok:true, count: ids.length });
   }catch(e){
-    await DB.run('ROLLBACK');
+    await db.run('ROLLBACK');
     console.error(e);
     res.status(500).json({ error: String(e.message || e) });
   }

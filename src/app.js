@@ -1,3 +1,13 @@
+/* app.js — Dual-Pane Mapping with robust Drag&Drop (Drop Zones + Row-Half + Animated Gaps)
+   - Left: source channels (Xtream/M3U), Right: enabled channels
+   - Drag from left→right inserts at a drop zone or via row-half (before/after)
+   - Drag within right reorders locally; numbers auto-update (#1, #2, ...)
+   - Debounced auto-persist of order; Startnummer steuerbar
+   - Search + pagination on both panes (server-side)
+   - EPG assignment (dropdown + suggest) on right rows
+   - Single debounce; fetch() with {cache:'no-cache'}
+*/
+
 // -------------------- Utils & Globals --------------------
 async function fetchJSON(url, opts){
   const r = await fetch(url, Object.assign({ cache: 'no-cache' }, opts||{}));
@@ -226,33 +236,16 @@ const persistRightOrderDebounced = debounce(persistRightOrder, 700);
 
 async function enableChannel(id, dropIndex){
   try {
+    const body = (typeof dropIndex === 'number')
+      ? { enabled: true, insertAt: Number(dropIndex) + 1 } // server expects 1-based
+      : { enabled: true };
     await fetchJSON('/api/channels/'+id, {
       method:'PATCH',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ enabled: true })
+      body: JSON.stringify(body)
     });
     showToast('Hinzugefügt');
     await loadRight();
-    async function persistRightOrderServer(){
-      const ids = RIGHT_ROWS.map(x => x.id);
-      await fetchJSON('/api/channels/order', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ ids })
-      });
-      await loadRight(); // holt kompakt 1..N vom Server
-    }
-    if (typeof dropIndex === 'number'){
-      const i = RIGHT_ROWS.findIndex(x => x.id === id);
-      if (i >= 0){
-        const [item] = RIGHT_ROWS.splice(i, 1);
-        const target = Math.min(Math.max(dropIndex, 0), RIGHT_ROWS.length);
-        RIGHT_ROWS.splice(target, 0, item);
-        renumberRightLocal(Number(document.getElementById('startNumberDual')?.value||1));
-        renderDualPane();
-        persistRightOrderDebounced();
-      }
-    }
   } catch(e){
     console.error(e);
     showToast('Konnte nicht hinzufügen','error');
@@ -261,32 +254,36 @@ async function enableChannel(id, dropIndex){
 
 async function disableChannel(id){
   try {
-        await fetchJSON('/api/channels/'+id, {
-          method:'PATCH',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ enabled:true, insertAt: dropIndex+1 }) // dropIndex war 0-basiert
-        });
-        await loadRight();
+    await fetchJSON('/api/channels/'+id, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ enabled: false })
+    });
     showToast('Entfernt');
     await Promise.all([loadLeft(), loadRight()]);
-    renumberRightLocal(Number(document.getElementById('startNumberDual')?.value||1));
-    persistRightOrderDebounced();
   } catch(e){
     console.error(e);
     showToast('Konnte nicht entfernen','error');
   }
 }
 
-function reorderRight(id, dropIndex){
+async function reorderRight(id, dropIndex){
   const i = RIGHT_ROWS.findIndex(x => x.id === id);
   if (i < 0) return;
   const target = Math.min(Math.max(dropIndex, 0), RIGHT_ROWS.length);
   const [item] = RIGHT_ROWS.splice(i, 1);
   const adjusted = (i < target) ? target - 1 : target;
   RIGHT_ROWS.splice(adjusted, 0, item);
-  renumberRightLocal(Number(document.getElementById('startNumberDual')?.value||1));
-  renderDualPane();
-  persistRightOrderDebounced();
+  // persist new order server-side: 1..N
+  try{
+    const ids = RIGHT_ROWS.map(x => x.id);
+    await fetchJSON('/api/channels/order', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids })
+    });
+  }catch(e){ console.warn('order persist failed', e); }
+  await loadRight(); // reload to get canonical numbers
 }
 
 async function saveRightOrder(){
@@ -689,46 +686,3 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     showToast('Init error: '+ (e.message||e), 'error');
   }
 });
-
-// SQLite helper: alles in 1..N verdichten (nur enabled), sortiert nach number, dann id
-async function compactNumbers(db){
-  // IDs in gewünschter Reihenfolge holen
-  const rows = await db.all(`
-    SELECT id FROM channels
-    WHERE enabled = 1
-    ORDER BY CASE WHEN number IS NULL THEN 1 ELSE 0 END, number, id
-  `);
-
-  // fortlaufend 1..N vergeben
-  let n = 1;
-  for (const r of rows){
-    await db.run(`UPDATE channels SET number = ? WHERE id = ?`, [n, r.id]);
-    n++;
-  }
-}
-
-// an Position einfügen: schiebt >= index nach unten
-async function insertAtPosition(db, id, index){
-  // alle Nummern >= index +1
-  await db.run(`
-    UPDATE channels
-    SET number = number + 1
-    WHERE enabled = 1 AND number IS NOT NULL AND number >= ?
-  `, [index]);
-
-  await db.run(`
-    UPDATE channels
-    SET enabled = 1, number = ?
-    WHERE id = ?
-  `, [index, id]);
-
-  // Sicherheit: verdichten falls vorher Lücken existierten
-  await compactNumbers(db);
-}
-
-// ans Ende anhängen
-async function appendToEnd(db, id){
-  const row = await db.get(`SELECT COALESCE(MAX(number),0) AS mx FROM channels WHERE enabled = 1`);
-  const next = (row?.mx || 0) + 1;
-  await db.run(`UPDATE channels SET enabled = 1, number = ? WHERE id = ?`, [next, id]);
-}
