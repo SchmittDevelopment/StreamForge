@@ -36,8 +36,8 @@ function readPkgVersion(){
 // ASCII aus Datei lesen (ascii.txt neben server.js oder im Projekt-Root ablegen)
 function loadAsciiArt(){
   const candidates = [
-    path.join(__dirname, 'ascii.txt'),
-    path.join(__dirname, '..', 'ascii.txt'),
+    path.resolve(process.cwd(), 'public', 'assets', 'logo.txt'),
+    path.resolve(process.cwd(), 'public', 'assets', 'logo.txt'),
   ];
   for (const p of candidates){
     try{
