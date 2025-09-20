@@ -6,16 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-other:
+    name: Build (Linux x64, macOS x64/arm64, Windows x64)
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: linux-x64-20.11.0
             out: streamforge-linux-x64
-          - os: ubuntu-latest
-            target: linux-arm64-20.11.0
-            out: streamforge-linux-arm64
           - os: macos-latest
             target: macos-x64-20.11.0
             out: streamforge-macos-x64
@@ -29,9 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with:
+          node-version: '20'
+          cache: 'npm'
       - run: npm ci
-      - run: npm i -D nexe
+      - run: npm i -D nexe@latest
       - name: Build binary
         run: npx nexe -i src/server.js -o dist/${{ matrix.out }} -t ${{ matrix.target }}
       - name: Make executable (Unix)
@@ -42,8 +42,35 @@ jobs:
           name: ${{ matrix.out }}
           path: dist/${{ matrix.out }}
 
+  # OPTIONAL: läuft nur, wenn du einen self-hosted ARM64 Runner hast
+  build-linux-arm64:
+    name: Build (Linux ARM64, from source)
+    runs-on: [self-hosted, Linux, ARM64]  # <-- ggf. an deine Runner-Labels anpassen
+    continue-on-error: true               # Release läuft weiter, falls kein Runner verfügbar ist
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install build prerequisites
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y python3 g++ make pkg-config libssl-dev
+          fi
+      - run: npm ci
+      - run: npm i -D nexe@latest
+      - name: Build from source (ARM64)
+        run: npx nexe -i src/server.js -o dist/streamforge-linux-arm64 -t linux-arm64-20.11.0 --build --clean
+      - run: chmod +x dist/streamforge-linux-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: streamforge-linux-arm64
+          path: dist/streamforge-linux-arm64
+
   release:
-    needs: build
+    name: Create GitHub Release
+    needs: [build-other]       # ARM64 ist optional; wird automatisch mitgenommen, falls vorhanden
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
