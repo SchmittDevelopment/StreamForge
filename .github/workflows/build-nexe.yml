@@ -1,0 +1,63 @@
+name: build-and-release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64-20.11.0
+            out: streamforge-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64-20.11.0
+            out: streamforge-linux-arm64
+          - os: macos-latest
+            target: macos-x64-20.11.0
+            out: streamforge-macos-x64
+          - os: macos-latest
+            target: macos-arm64-20.11.0
+            out: streamforge-macos-arm64
+          - os: windows-latest
+            target: windows-x64-20.11.0
+            out: streamforge-win-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm i -D nexe
+      - name: Build binary
+        run: npx nexe -i src/server.js -o dist/${{ matrix.out }} -t ${{ matrix.target }}
+      - name: Make executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x dist/${{ matrix.out }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: dist/${{ matrix.out }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/**/*
