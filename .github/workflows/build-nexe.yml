@@ -1,8 +1,7 @@
 name: build-and-release
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    tags: ['v*.*.*']
   workflow_dispatch:
 
 jobs:
@@ -49,21 +48,23 @@ jobs:
       - run: npm ci
       - run: npm i -D nexe@latest
       - name: Build (from source)
+        env:
+          CC: clang
+          CXX: clang++
         run: |
-          # Xcode-Tools sind auf GitHub-Runnern vorinstalliert
-          npx nexe -i src/server.js -o dist/streamforge-macos-arm64 -t macos-arm64-20.11.0 --build --clean
+          # Wichtig: --build erzwingt Kompilierung statt Prebuilt-Download
+          npx nexe -i src/server.js -o dist/streamforge-macos-arm64 \
+            -t macos-arm64-20.11.0 --build --clean --loglevel verbose
       - run: chmod +x dist/streamforge-macos-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: streamforge-macos-arm64
           path: dist/streamforge-macos-arm64
 
+  # Optional: nur wenn du einen Intel-Runner hast; sonst Job entfernen oder continue-on-error belassen
   macos-x64:
-    name: Build macOS x64 (Intel)  # braucht Intel-Runner oder self-hosted
-    # Variante A (falls GitHub noch Intel-Runner anbietet):
+    name: Build macOS x64 (from source)
     runs-on: macos-13
-    # Variante B (falls du eigenen Intel-Mac nutzt):
-    # runs-on: [self-hosted, macOS, X64]
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -72,9 +73,12 @@ jobs:
       - run: npm ci
       - run: npm i -D nexe@latest
       - name: Build (from source)
+        env:
+          CC: clang
+          CXX: clang++
         run: |
-          # Falls der Runner ARM ist, schlägt x64 fehl → daher continue-on-error am Job
-          npx nexe -i src/server.js -o dist/streamforge-macos-x64 -t macos-x64-20.11.0 --build --clean
+          npx nexe -i src/server.js -o dist/streamforge-macos-x64 \
+            -t macos-x64-20.11.0 --build --clean --loglevel verbose
       - run: chmod +x dist/streamforge-macos-x64 || true
       - uses: actions/upload-artifact@v4
         if: success()
@@ -82,15 +86,16 @@ jobs:
           name: streamforge-macos-x64
           path: dist/streamforge-macos-x64
 
+  # Optional: braucht self-hosted ARM64 Runner
   linux-arm64:
     name: Build Linux arm64 (from source)
-    runs-on: [self-hosted, Linux, ARM64]  # passe Labels an deinen Runner an
-    continue-on-error: true               # Release läuft weiter, falls kein Runner verfügbar
+    runs-on: [self-hosted, Linux, ARM64]
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
-      - name: Build toolchain
+      - name: Toolchain
         run: |
           if command -v apt-get >/dev/null 2>&1; then
             sudo apt-get update
@@ -99,7 +104,9 @@ jobs:
       - run: npm ci
       - run: npm i -D nexe@latest
       - name: Build (from source)
-        run: npx nexe -i src/server.js -o dist/streamforge-linux-arm64 -t linux-arm64-20.11.0 --build --clean
+        run: |
+          npx nexe -i src/server.js -o dist/streamforge-linux-arm64 \
+            -t linux-arm64-20.11.0 --build --clean --loglevel verbose
       - run: chmod +x dist/streamforge-linux-arm64 || true
       - uses: actions/upload-artifact@v4
         if: success()
