@@ -6,37 +6,27 @@ on:
 
 jobs:
   linux-x64:
-    name: Build Linux x64 (prebuilt)
+    name: Build Linux x64 (from source)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 g++ make pkg-config libssl-dev
       - run: npm ci
       - run: npm i -D nexe@latest
-      - name: Build
-        run: npx nexe -i src/server.js -o dist/streamforge-linux-x64 -t linux-x64-20.11.0
+      - name: Build (from source)
+        run: |
+          npx nexe -i src/server.js -o dist/streamforge-linux-x64 \
+            -t linux-x64-20.11.0 --build --clean --loglevel verbose
       - run: chmod +x dist/streamforge-linux-x64
       - uses: actions/upload-artifact@v4
         with:
           name: streamforge-linux-x64
           path: dist/streamforge-linux-x64
-
-  windows-x64:
-    name: Build Windows x64 (prebuilt)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'npm' }
-      - run: npm ci
-      - run: npm i -D nexe@latest
-      - name: Build
-        run: npx nexe -i src/server.js -o dist/streamforge-win-x64.exe -t windows-x64-20.11.0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: streamforge-win-x64
-          path: dist/streamforge-win-x64.exe
 
   macos-arm64:
     name: Build macOS arm64 (from source)
@@ -52,7 +42,6 @@ jobs:
           CC: clang
           CXX: clang++
         run: |
-          # Wichtig: --build erzwingt Kompilierung statt Prebuilt-Download
           npx nexe -i src/server.js -o dist/streamforge-macos-arm64 \
             -t macos-arm64-20.11.0 --build --clean --loglevel verbose
       - run: chmod +x dist/streamforge-macos-arm64
@@ -61,7 +50,26 @@ jobs:
           name: streamforge-macos-arm64
           path: dist/streamforge-macos-arm64
 
-  # Optional: nur wenn du einen Intel-Runner hast; sonst Job entfernen oder continue-on-error belassen
+  windows-x64:
+    name: Build Windows x64 (prebuilt; set --build if needed)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm i -D nexe@latest
+      - name: Build
+        run: |
+          # Falls Prebuilt fehlt, ersetze die nächste Zeile durch:
+          # npx nexe -i src/server.js -o dist/streamforge-win-x64.exe -t windows-x64-20.11.0 --build --clean --loglevel verbose
+          npx nexe -i src/server.js -o dist/streamforge-win-x64.exe -t windows-x64-20.11.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: streamforge-win-x64
+          path: dist/streamforge-win-x64.exe
+
+  # Optional (benötigt Intel-Runner oder self-hosted Intel)
   macos-x64:
     name: Build macOS x64 (from source)
     runs-on: macos-13
@@ -86,7 +94,7 @@ jobs:
           name: streamforge-macos-x64
           path: dist/streamforge-macos-x64
 
-  # Optional: braucht self-hosted ARM64 Runner
+  # Optional (benötigt self-hosted ARM64)
   linux-arm64:
     name: Build Linux arm64 (from source)
     runs-on: [self-hosted, Linux, ARM64]
@@ -95,7 +103,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
-      - name: Toolchain
+      - name: Install toolchain
         run: |
           if command -v apt-get >/dev/null 2>&1; then
             sudo apt-get update
@@ -118,8 +126,8 @@ jobs:
     name: Create GitHub Release
     needs:
       - linux-x64
-      - windows-x64
       - macos-arm64
+      - windows-x64
       - macos-x64
       - linux-arm64
     if: startsWith(github.ref, 'refs/tags/')
